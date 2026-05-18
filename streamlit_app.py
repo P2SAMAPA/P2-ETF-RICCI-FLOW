@@ -68,36 +68,19 @@ if "error" in data:
 st.session_state['run_date'] = data['run_date']
 universes = data["universes"]
 
-# Explanation expander
-with st.expander("📖 Understanding the metrics and how to trade", expanded=False):
-    st.markdown("""
-    ### **Geometric Instability Score** (per ETF)
-    - Sum of absolute edge curvatures incident to the ETF, weighted by correlation strength, divided by (degree+1).
-    - **Higher score = more geometrically stressed = more likely to be a contagion bridge or a turning point.**
-    - For trading: **overweight the ETFs with the highest instability** (they are the focal points of market stress and may lead reversals).
-
-    ### **Stress Index** (global)
-    - Average absolute Ollivier‑Ricci curvature over all edges after Ricci flow.
-    - **Higher value = more curved market = higher systemic stress.**
-
-    ### **Curvature Momentum**
-    - Change in stress index over time (positive = curvature increasing, market becoming more stressed).
-    - (Currently a placeholder; future version will compute rolling change.)
-
-    ### **Entropy Curvature**
-    - Von Neumann entropy of the graph Laplacian. High entropy = more uniform curvature distribution.
-    - **Higher entropy = less concentrated risk.**
-
-    ### **Geodesic Deviation**
-    - Variance of shortest path lengths. High variance = heterogeneous network = potential for cascading failures.
-
-    ### **How to pick the best ETFs**
-    - The engine selects for each ETF the rolling window that yields the **highest instability score**.
-    - Then it ranks all ETFs by that best instability score.
-    - **Higher instability → stronger signal** (focus of market stress).
-    """)
-
 st.header("🏆 Top ETFs by Geometric Instability Score (after Ricci flow)")
+
+# Explanation section
+with st.expander("📖 How to interpret the metrics", expanded=True):
+    st.markdown("""
+    - **Geometric Instability Score (per ETF):** Sum of absolute incident curvatures weighted by edge strength. **Higher score** indicates the ETF sits in a geometrically stressed region of the market – often a precursor to volatility spikes or regime shifts. **Ranking:** pick ETFs with **highest** instability.
+    - **Stress Index (global):** Average absolute curvature across all edges. High stress = the whole market is tense.
+    - **Curvature Momentum:** Change in stress index (positive = increasing stress, negative = relaxing). Currently a placeholder; future versions will track historical changes.
+    - **Entropy Curvature:** Von Neumann entropy of the graph Laplacian. Higher entropy = more disordered/less curved market.
+    - **Geodesic Deviation:** Variance of shortest path lengths. Higher deviation = more heterogeneous distances → more curved geometry.
+    
+    **How to pick the best ETF:** Sort ETFs by **Instability Score** (highest first). The top ETFs are those most geometrically stressed, which often lead market moves or are early indicators of systemic risk.
+    """)
 
 for universe_name, uni_data in universes.items():
     top_etfs = uni_data.get("top_etfs", [])
@@ -114,28 +97,20 @@ for universe_name, uni_data in universes.items():
                 <div class="etf-score">best window = {etf.get('best_window', 'N/A')}d</div>
             </div>
             """, unsafe_allow_html=True)
-    # Show global curvature metrics for the top ETF's best window
-    if top_etfs:
-        best_win = top_etfs[0].get('best_window')
-        if best_win is not None and best_win != 'N/A':
-            win_res = uni_data.get("window_results", {})
-            # window_results keys are ints, but best_win from JSON may be int or str
-            best_win_int = int(best_win) if str(best_win).isdigit() else None
-            metrics = win_res.get(best_win_int, {}) if best_win_int else {}
-            if metrics:
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Stress Index", f"{metrics.get('stress_index', 0):.4f}")
-                with col2:
-                    st.metric("Curvature Momentum", f"{metrics.get('momentum', 0):.4f}")
-                with col3:
-                    st.metric("Entropy Curvature", f"{metrics.get('entropy', 0):.4f}")
-                with col4:
-                    st.metric("Geodesic Deviation", f"{metrics.get('geodesic_deviation', 0):.4f}")
-            else:
-                st.info("Global metrics not available for this window.")
-        else:
-            st.info("No best window found for top ETF.")
+    # Global metrics for the best window
+    global_metrics = uni_data.get("global_metrics", {})
+    if global_metrics:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Stress Index", f"{global_metrics.get('stress_index', 0):.4f}")
+        with col2:
+            st.metric("Curvature Momentum", f"{global_metrics.get('momentum', 0):.4f}")
+        with col3:
+            st.metric("Entropy Curvature", f"{global_metrics.get('entropy', 0):.4f}")
+        with col4:
+            st.metric("Geodesic Deviation", f"{global_metrics.get('geodesic_deviation', 0):.4f}")
+    else:
+        st.info("Global metrics not available for this window.")
     with st.expander("📋 Full ranking (all ETFs, best window per ETF)"):
         full = uni_data.get("full_scores", {})
         if full:
@@ -154,4 +129,4 @@ for universe_name, uni_data in universes.items():
             st.dataframe(df, use_container_width=True, hide_index=True)
     st.divider()
 
-st.caption("The correlation graph is evolved via discrete Ricci flow. Instability score = sum of absolute incident curvatures weighted by correlation strength. Higher instability = more geometrically stressed ETF. Global metrics are shown for the best window of the top ETF.")
+st.caption("The correlation graph is evolved via discrete Ricci flow (5 iterations). Instability score = sum of |curvature| × weight / (degree+1). Higher instability = more geometrically stressed ETF. Global metrics are computed on the full correlation graph for the window where the top ETF performed best.")
