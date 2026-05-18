@@ -22,13 +22,20 @@ def convert_to_serializable(obj):
         return [convert_to_serializable(i) for i in obj]
     return obj
 
-def compute_etf_instability(G):
-    """Compute geometric instability score per ETF: sum of absolute incident curvatures."""
-    curv = ollivier_ricci_curvature(G)
-    instability = {node: 0.0 for node in G.nodes}
-    for (u, v), c in curv.items():
-        instability[u] += abs(c)
-        instability[v] += abs(c)
+def compute_etf_instability(G, curv):
+    """
+    Compute instability as sum of |curvature| * weight / (degree+1) for each node.
+    """
+    instability = {}
+    for node in G.nodes:
+        total = 0.0
+        deg = G.degree(node, weight='weight')
+        for nb in G.neighbors(node):
+            edge = (node, nb) if (node, nb) in curv else (nb, node)
+            c = curv.get(edge, 0.0)
+            w = G[node][nb]['weight']
+            total += abs(c) * w
+        instability[node] = total / (deg + 1.0)
     return instability
 
 def main():
@@ -57,30 +64,40 @@ def main():
                 continue
             print(f"  Processing window {win}d...")
             ret_win = returns.iloc[-win:]
-            # Build correlation graph
+            # Build correlation graph with sparsification (keep only top 20% edges by correlation)
             corr = ret_win.corr().abs()
             G = nx.Graph()
-            for i, ticker in enumerate(tickers):
+            for ticker in tickers:
                 G.add_node(ticker)
+            # Keep edges where correlation > 0.5 to sparsify
+            threshold = 0.5
             for i in range(len(tickers)):
                 for j in range(i+1, len(tickers)):
                     w = corr.iloc[i, j]
-                    if w > 0.1:
+                    if w > threshold:
                         G.add_edge(tickers[i], tickers[j], weight=w)
-            # Compute curvatures
-            forman = forman_ricci_curvature(G)
+            # If graph is empty, use all edges
+            if G.number_of_edges() == 0:
+                for i in range(len(tickers)):
+                    for j in range(i+1, len(tickers)):
+                        w = corr.iloc[i, j]
+                        if w > 0:
+                            G.add_edge(tickers[i], tickers[j], weight=w)
+            # Compute curvatures on original graph
             ollivier = ollivier_ricci_curvature(G)
+            forman = forman_ricci_curvature(G)
             entropy = entropy_curvature(G)
             geodesic = geodesic_deviation(G)
             # Apply Ricci flow
             G_flow = ricci_flow(G, iterations=config.RICCI_ITERATIONS, step=config.RICCI_STEP)
-            # Compute instability scores after flow
-            instability = compute_etf_instability(G_flow)
-            # Stress index = average absolute curvature
-            stress_index = np.mean([abs(c) for c in ollivier.values()]) if ollivier else 0.0
-            # Curvature momentum = change in average curvature (dummy, we don't have past)
+            # Compute curvatures after flow (use Ollivier again)
+            curv_flow = ollivier_ricci_curvature(G_flow)
+            # Compute instability scores
+            instability = compute_etf_instability(G_flow, curv_flow)
+            # Stress index = average absolute curvature after flow
+            stress_index = np.mean([abs(c) for c in curv_flow.values()]) if curv_flow else 0.0
+            # Curvature momentum = change in average curvature (placeholder)
             momentum = 0.0
-            # Store per window results
             window_results[win] = {
                 "instability": instability,
                 "stress_index": stress_index,
