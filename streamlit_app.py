@@ -14,11 +14,44 @@ st.markdown("""
     .etf-card { background: linear-gradient(135deg, #1f77b4 0%, #2c3e50 100%); color: white; border-radius: 15px; padding: 1rem; margin: 0.5rem; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
     .etf-ticker { font-size: 1.3rem; font-weight: bold; }
     .etf-score { font-size: 0.9rem; margin-top: 0.3rem; }
+    .explanation-box {
+        background-color: #f0f2f6;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🌀 Ricci Flow Engine</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Ollivier‑Ricci curvature | Forman‑Ricci | Entropy curvature | Geodesic deviation | Discrete Ricci flow | Multi‑window evaluation</div>', unsafe_allow_html=True)
+
+# Explanation section
+with st.expander("📖 How to interpret the metrics (click to expand)"):
+    st.markdown("""
+    <div class="explanation-box">
+    <strong>🔍 Geometric Instability Score (per ETF)</strong><br>
+    Sum of absolute incident curvatures weighted by edge strength, divided by degree+1.  
+    <span style="color:#1f77b4">Higher value</span> → ETF is in a highly curved region of the correlation graph → potential contagion bridge or structurally stressed asset.  
+    <em>Our ranking selects ETFs with the highest instability (most curved).</em><br><br>
+    
+    <strong>📊 Stress Index (global)</strong><br>
+    Average absolute curvature across all edges. High stress → market graph is far from flat → fragile, susceptible to regime shifts.<br><br>
+    
+    <strong>📈 Curvature Momentum</strong><br>
+    Change in stress index compared to previous period (if available). Positive momentum → curvature increasing → market becoming more stressed.<br><br>
+    
+    <strong>🌀 Entropy Curvature</strong><br>
+    Von Neumann entropy of the graph Laplacian. High entropy → disordered, low structure → less predictable.<br><br>
+    
+    <strong>📏 Geodesic Deviation</strong><br>
+    Variance of shortest path lengths between nodes. High deviation → irregular geometry, some clusters far apart.<br><br>
+    
+    <strong>🏆 How to pick the best ETF?</strong><br>
+    The engine sorts ETFs by <strong>Instability Score (descending)</strong>. Higher instability suggests the ETF is at the centre of geometric stress, making it a potential leading indicator of market turmoil or a candidate for hedging.<br>
+    For each ETF, the engine selects the rolling window that gives the highest instability score.
+    </div>
+    """, unsafe_allow_html=True)
 
 st.sidebar.markdown("## 🌀 Ricci Flow")
 st.sidebar.markdown(f"**Run Date:** `{st.session_state.get('run_date', 'Not loaded')}`")
@@ -85,20 +118,21 @@ for universe_name, uni_data in universes.items():
                 <div class="etf-score">best window = {etf.get('best_window', 'N/A')}d</div>
             </div>
             """, unsafe_allow_html=True)
-    # Show global curvature metrics
+    # Show global curvature metrics for the best window (use the window of the top ETF)
     win_res = uni_data.get("window_results", {})
-    if win_res:
-        best_win = max(win_res.keys())  # or use the one from top ETF
-        metrics = win_res.get(best_win, {})
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Stress Index", f"{metrics.get('stress_index', 0):.4f}")
-        with col2:
-            st.metric("Curvature Momentum", f"{metrics.get('momentum', 0):.4f}")
-        with col3:
-            st.metric("Entropy Curvature", f"{metrics.get('entropy', 0):.4f}")
-        with col4:
-            st.metric("Geodesic Deviation", f"{metrics.get('geodesic_deviation', 0):.4f}")
+    if win_res and top_etfs:
+        best_win = top_etfs[0].get('best_window')
+        if best_win is not None and best_win != 'N/A':
+            metrics = win_res.get(best_win, {})
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Stress Index", f"{metrics.get('stress_index', 0):.4f}")
+            with col2:
+                st.metric("Curvature Momentum", f"{metrics.get('momentum', 0):.4f}")
+            with col3:
+                st.metric("Entropy Curvature", f"{metrics.get('entropy', 0):.4f}")
+            with col4:
+                st.metric("Geodesic Deviation", f"{metrics.get('geodesic_deviation', 0):.4f}")
     with st.expander("📋 Full ranking (all ETFs, best window per ETF)"):
         full = uni_data.get("full_scores", {})
         if full:
@@ -117,4 +151,4 @@ for universe_name, uni_data in universes.items():
             st.dataframe(df, use_container_width=True, hide_index=True)
     st.divider()
 
-st.caption("The correlation graph is evolved via discrete Ricci flow (5 iterations). Instability score = sum of absolute incident curvatures. Higher instability = more geometrically stressed ETF. Curvature stress index = average absolute curvature over all edges.")
+st.caption("The correlation graph is evolved via discrete Ricci flow (5 iterations). Instability score = sum of |curvature| * weight / (degree+1). Higher instability = more geometrically stressed ETF. The engine selects for each ETF the rolling window that gives the highest instability. Global metrics are shown for the top ETF's best window.")
