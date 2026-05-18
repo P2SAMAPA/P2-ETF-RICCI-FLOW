@@ -23,9 +23,6 @@ def convert_to_serializable(obj):
     return obj
 
 def compute_etf_instability(G, curv):
-    """
-    Compute instability as sum of |curvature| * weight / (degree+1) for each node.
-    """
     instability = {}
     for node in G.nodes:
         total = 0.0
@@ -35,7 +32,7 @@ def compute_etf_instability(G, curv):
             c = curv.get(edge, 0.0)
             w = G[node][nb]['weight']
             total += abs(c) * w
-        instability[node] = total / (deg + 1.0)
+        instability[node] = total / (deg + 1.0) if deg > 0 else 0.0
     return instability
 
 def main():
@@ -64,39 +61,49 @@ def main():
                 continue
             print(f"  Processing window {win}d...")
             ret_win = returns.iloc[-win:]
-            # Build correlation graph with sparsification (keep only top 20% edges by correlation)
-            corr = ret_win.corr().abs()
+            # Correlation graph (full, for entropy and geodesic)
+            corr_full = ret_win.corr().abs()
+            G_full = nx.Graph()
+            for ticker in tickers:
+                G_full.add_node(ticker)
+            for i in range(len(tickers)):
+                for j in range(i+1, len(tickers)):
+                    w = corr_full.iloc[i, j]
+                    if w > 0:
+                        G_full.add_edge(tickers[i], tickers[j], weight=w)
+            # Compute entropy and geodesic deviation on full graph (non-zero)
+            entropy = entropy_curvature(G_full) if G_full.number_of_edges() > 0 else 0.0
+            geodesic = geodesic_deviation(G_full) if G_full.number_of_edges() > 0 else 0.0
+
+            # Sparse graph for curvature and flow
+            threshold = 0.5
             G = nx.Graph()
             for ticker in tickers:
                 G.add_node(ticker)
-            # Keep edges where correlation > 0.5 to sparsify
-            threshold = 0.5
             for i in range(len(tickers)):
                 for j in range(i+1, len(tickers)):
-                    w = corr.iloc[i, j]
+                    w = corr_full.iloc[i, j]
                     if w > threshold:
                         G.add_edge(tickers[i], tickers[j], weight=w)
-            # If graph is empty, use all edges
             if G.number_of_edges() == 0:
+                # fallback: use all positive edges
                 for i in range(len(tickers)):
                     for j in range(i+1, len(tickers)):
-                        w = corr.iloc[i, j]
+                        w = corr_full.iloc[i, j]
                         if w > 0:
                             G.add_edge(tickers[i], tickers[j], weight=w)
-            # Compute curvatures on original graph
+
+            # Compute curvatures on original sparse graph
             ollivier = ollivier_ricci_curvature(G)
-            forman = forman_ricci_curvature(G)
-            entropy = entropy_curvature(G)
-            geodesic = geodesic_deviation(G)
             # Apply Ricci flow
             G_flow = ricci_flow(G, iterations=config.RICCI_ITERATIONS, step=config.RICCI_STEP)
-            # Compute curvatures after flow (use Ollivier again)
+            # Compute curvatures after flow
             curv_flow = ollivier_ricci_curvature(G_flow)
-            # Compute instability scores
+            # Instability scores
             instability = compute_etf_instability(G_flow, curv_flow)
             # Stress index = average absolute curvature after flow
             stress_index = np.mean([abs(c) for c in curv_flow.values()]) if curv_flow else 0.0
-            # Curvature momentum = change in average curvature (placeholder)
+            # Momentum (placeholder, could compute change from previous window)
             momentum = 0.0
             window_results[win] = {
                 "instability": instability,
