@@ -32,7 +32,7 @@ def compute_etf_instability(G, curv):
             c = curv.get(edge, 0.0)
             w = G[node][nb]['weight']
             total += abs(c) * w
-        instability[node] = total / (deg + 1.0) if deg > 0 else 0.0
+        instability[node] = total / (deg + 1.0)
     return instability
 
 def main():
@@ -61,56 +61,48 @@ def main():
                 continue
             print(f"  Processing window {win}d...")
             ret_win = returns.iloc[-win:]
-            # Correlation graph (full, for entropy and geodesic)
+            # Full correlation graph for global metrics
             corr_full = ret_win.corr().abs()
             G_full = nx.Graph()
-            for ticker in tickers:
-                G_full.add_node(ticker)
-            for i in range(len(tickers)):
-                for j in range(i+1, len(tickers)):
-                    w = corr_full.iloc[i, j]
-                    if w > 0:
-                        G_full.add_edge(tickers[i], tickers[j], weight=w)
-            # Compute entropy and geodesic deviation on full graph (non-zero)
-            entropy = entropy_curvature(G_full) if G_full.number_of_edges() > 0 else 0.0
-            geodesic = geodesic_deviation(G_full) if G_full.number_of_edges() > 0 else 0.0
+            for t in tickers:
+                G_full.add_node(t)
+            for i, t1 in enumerate(tickers):
+                for j, t2 in enumerate(tickers):
+                    if i < j and corr_full.iloc[i,j] > 0:
+                        G_full.add_edge(t1, t2, weight=corr_full.iloc[i,j])
+            # Compute entropy and geodesic deviation on full graph
+            entropy = entropy_curvature(G_full)
+            geodesic = geodesic_deviation(G_full)
 
             # Sparse graph for curvature and flow
             threshold = 0.5
             G = nx.Graph()
-            for ticker in tickers:
-                G.add_node(ticker)
+            for t in tickers:
+                G.add_node(t)
             for i in range(len(tickers)):
                 for j in range(i+1, len(tickers)):
                     w = corr_full.iloc[i, j]
                     if w > threshold:
                         G.add_edge(tickers[i], tickers[j], weight=w)
             if G.number_of_edges() == 0:
-                # fallback: use all positive edges
                 for i in range(len(tickers)):
                     for j in range(i+1, len(tickers)):
                         w = corr_full.iloc[i, j]
                         if w > 0:
                             G.add_edge(tickers[i], tickers[j], weight=w)
-
-            # Compute curvatures on original sparse graph
-            ollivier = ollivier_ricci_curvature(G)
             # Apply Ricci flow
             G_flow = ricci_flow(G, iterations=config.RICCI_ITERATIONS, step=config.RICCI_STEP)
-            # Compute curvatures after flow
             curv_flow = ollivier_ricci_curvature(G_flow)
-            # Instability scores
             instability = compute_etf_instability(G_flow, curv_flow)
-            # Stress index = average absolute curvature after flow
             stress_index = np.mean([abs(c) for c in curv_flow.values()]) if curv_flow else 0.0
-            # Momentum (placeholder, could compute change from previous window)
-            momentum = 0.0
+            momentum = 0.0  # placeholder
+
             window_results[win] = {
                 "instability": instability,
-                "stress_index": stress_index,
-                "momentum": momentum,
-                "entropy": entropy,
-                "geodesic_deviation": geodesic
+                "stress_index": float(stress_index),
+                "momentum": float(momentum),
+                "entropy": float(entropy),
+                "geodesic_deviation": float(geodesic)
             }
             for etf, score in instability.items():
                 if etf not in best_per_etf or score > best_per_etf[etf][0]:
@@ -131,11 +123,19 @@ def main():
         sorted_etfs = sorted(best_per_etf.items(), key=lambda x: x[1][0], reverse=True)
         top_etfs = [{"ticker": ticker, "instability": float(score), "best_window": win} for ticker, (score, win) in sorted_etfs[:config.TOP_N]]
 
+        # Get the best window (the one used by the top ETF)
+        best_win = top_etfs[0]['best_window'] if top_etfs else None
+        if best_win is not None:
+            global_metrics = window_results.get(best_win, {})
+        else:
+            global_metrics = {}
+
         print(f"  Top 3 ETFs by geometric instability: {[e['ticker'] for e in top_etfs]}")
         all_results[universe_name] = {
             "top_etfs": top_etfs,
             "full_scores": full_scores,
             "window_results": window_results,
+            "global_metrics": global_metrics,
             "run_date": today
         }
 
